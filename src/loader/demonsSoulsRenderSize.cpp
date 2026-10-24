@@ -211,12 +211,13 @@ void Install(Program* program) {
 		            wide);
 	// The PS5 Pro path with a smaller output (KYTY_HD_OUTPUT or KYTY_OUTPUT_HEIGHT) takes a wider aspect squeezed into its
 	// 16:9 output (KYTY_WIDE_OUTPUT=0, as the 4K output's), the 3D as wide as the output and as high as the aspect
-	// makes it: 2560x1072 into 2560x1440 was right, 1912x800 and 1872x784 into 1920x1080 showed the 3D deep green.
+	// makes it, its height rounded to 16: 2560x1072 into 2560x1440 and 1920x800 into 1920x1080 were right; 1912x800,
+	// 1872x784 and 1920x808 (21:9 rounded to 8) into 1920x1080 showed the 3D deep green.
 	// Its own wide output is not made (InstallWideOutput sizes that output already).
 	const char* wide_output = std::getenv("KYTY_WIDE_OUTPUT");
 	uint32_t    squeezed_width = 0;
 	if (hd_pro && aspect != 0.0 && wide_output != nullptr && std::strcmp(wide_output, "0") == 0) {
-		const auto fitted = static_cast<uint32_t>(std::lround(pro_width / aspect / 8.0)) * 8u;
+		const auto fitted = static_cast<uint32_t>(std::lround(pro_width / aspect / 16.0)) * 16u;
 		if (fitted != requested)
 			std::printf("Demon's Souls render size: %u at the wider aspect squeezed into the %ux%u output: %ux%u instead\n",
 			            requested, pro_width, pro_height, pro_width, fitted);
