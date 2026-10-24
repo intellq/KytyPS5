@@ -235,10 +235,13 @@ inline bool IsReticle(const HW::VertexShaderInfo& vs, uint32_t first) {
 
 // KYTY_FRAMEGEN_BACKEND=fsr: an interface draw names the canvas (its render target) whose alpha marks the HUD for FSR
 // (FrameGen::NoteUiCanvas).
+// (KYTY_OUTPUT_HEIGHT above 1080: the canvas is the output's size, the HD layout scaled into it; OutputTarget below.)
+inline bool OutputTarget(const HW::Context& ctx);
 inline void NoteCanvas(const HW::Context& ctx, const HW::VertexShaderInfo& vs) {
 	const auto& target = ctx.GetRenderTarget(0);
-	if (target.base.addr == 0 || target.attrib2.width + 1u != CanvasWidth() ||
-	    target.attrib2.height + 1u != CanvasHeight())
+	const bool  output = ::Loader::DemonsSoulsHdOutput::InterfaceScaled() && OutputTarget(ctx);
+	if (target.base.addr == 0 ||
+	    (!output && (target.attrib2.width + 1u != CanvasWidth() || target.attrib2.height + 1u != CanvasHeight())))
 		return;
 	const uint64_t hash = HashAt(vs.es_regs.data_addr);
 	if (hash == PixelShader || std::find(ClipShaders.begin(), ClipShaders.end(), hash) != ClipShaders.end())
