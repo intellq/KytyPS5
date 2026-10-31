@@ -1,4 +1,5 @@
 #include "local/anti-lag.h"
+#include "local/fsr-native.h"
 
 #include <algorithm>
 #include <atomic>
@@ -59,7 +60,8 @@ bool Requested() {
 		const bool  wanted      = low_latency != nullptr && std::atoi(low_latency) != 0 && anti_lag != nullptr && std::atoi(anti_lag) != 0;
 		// Not with frame generation (FSR 3's, on an AMD GPU): its swapchain paces the presents itself, and with Anti-Lag's
 		// waits on top an RX 6650 XT's menus held the game ~100 ms a frame, 1% lows of 5-6 fps (issue #252).
-		if (wanted && framegen != nullptr && std::atoi(framegen) != 0) {
+		// Linux's native FSR backend implies generation without a numeric KYTY_FRAMEGEN.
+		if (wanted && ((framegen != nullptr && std::atoi(framegen) != 0) || FsrNative::InterpolationRequested())) {
 			std::printf("Low latency: AMD Anti-Lag off with frame generation (FSR 3 paces the frames itself; issue #252)\n");
 			std::fflush(stdout);
 			return false;

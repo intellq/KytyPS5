@@ -1979,7 +1979,9 @@ static bool PresentDirect() {
 	static const bool on = [] {
 		const char* value = std::getenv("KYTY_PRESENT_DIRECT");
 		if (value == nullptr || value[0] != '1') return false;
-		if (const char* framegen = std::getenv("KYTY_FRAMEGEN"); framegen != nullptr && std::atoi(framegen) != 0) {
+		// Linux's native FSR backend implies generation without a numeric KYTY_FRAMEGEN.
+		if (const char* framegen = std::getenv("KYTY_FRAMEGEN");
+		    (framegen != nullptr && std::atoi(framegen) != 0) || FsrNative::InterpolationRequested()) {
 			std::printf("Presentation: KYTY_PRESENT_DIRECT off with frame generation (it held the game at half the display's "
 			            "rate; issue #236)\n");
 			std::fflush(stdout);
