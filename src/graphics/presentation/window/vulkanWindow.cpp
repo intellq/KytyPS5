@@ -111,6 +111,17 @@ static bool HasExtension(const std::vector<const char*>& extensions, const char*
 	                   [name](const char* ext) { return strcmp(ext, name) == 0; });
 }
 
+// KYTY_FSR4_MATRIX=1 with KYTY_FSR4=1 (local): the matrix features FSR 4's FP8 model declares (RX 9000: cooperative
+// matrices, FP8 in them, the NV matrix conversions), each where the GPU has it, so that its shaders are used within the
+// spec (without them RADV builds them all the same). Off: the device as upstream's.
+static bool Fsr4MatrixFeatures() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_FSR4_MATRIX");
+		return Fsr4Linux::Requested() && value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	return on;
+}
+
 #if defined(_WIN32)
 // KYTY_FULLSCREEN_EXCLUSIVE=0|1 (GraphicContext::full_screen_exclusive): -1 when unset.
 static int FullscreenExclusiveRequest() {
@@ -1022,6 +1033,26 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		supported_coherent.pNext  = supported_features2.pNext;
 		supported_features2.pNext = &supported_coherent;
 	}
+	const bool matrix_features  = Fsr4MatrixFeatures();
+	const bool matrix_extension = matrix_features && HasExtension(device_extensions, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+	const bool float8_extension = matrix_features && HasExtension(device_extensions, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+	const bool matrix2_extension =
+	    matrix_features && HasExtension(device_extensions, VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME);
+	vk::PhysicalDeviceCooperativeMatrixFeaturesKHR  supported_matrix {};
+	vk::PhysicalDeviceShaderFloat8FeaturesEXT       supported_float8 {};
+	vk::PhysicalDeviceCooperativeMatrix2FeaturesNV  supported_matrix2 {};
+	if (matrix_extension) {
+		supported_matrix.pNext    = supported_features2.pNext;
+		supported_features2.pNext = &supported_matrix;
+	}
+	if (float8_extension) {
+		supported_float8.pNext    = supported_features2.pNext;
+		supported_features2.pNext = &supported_float8;
+	}
+	if (matrix2_extension) {
+		supported_matrix2.pNext   = supported_features2.pNext;
+		supported_features2.pNext = &supported_matrix2;
+	}
 	physical_device.getFeatures2(&supported_features2);
 	graphics.copy_memory_indirect_enabled = copy_indirect_extension && supported_copy_indirect.indirectCopy;
 	graphics.pipeline_statistics_enabled  = executable_extension && supported_executables.pipelineExecutableInfo;
@@ -1186,6 +1217,13 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		            derivatives_extension && (supported_derivatives.computeDerivativeGroupQuads ||
 		                                      supported_derivatives.computeDerivativeGroupLinear),
 		            coherent_extension && supported_coherent.deviceCoherentMemory);
+		if (matrix_features)
+			std::printf("Vulkan: FSR 4 matrix features (KYTY_FSR4_MATRIX=1): cooperative matrix %u, float8 %u, float8 "
+			            "cooperative matrix %u, matrix conversions %u\n",
+			            matrix_extension && supported_matrix.cooperativeMatrix,
+			            float8_extension && supported_float8.shaderFloat8,
+			            float8_extension && supported_float8.shaderFloat8CooperativeMatrix,
+			            matrix2_extension && supported_matrix2.cooperativeMatrixConversions);
 	}
 	graphics.pipeline_cache_control_enabled = features13.pipelineCreationCacheControl == VK_TRUE;
 
@@ -1277,6 +1315,25 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		coherent.deviceCoherentMemory = VK_TRUE;
 		coherent.pNext                = const_cast<void*>(create_info.pNext);
 		create_info.pNext             = &coherent;
+	}
+	vk::PhysicalDeviceCooperativeMatrixFeaturesKHR matrix {};
+	if (matrix_extension && supported_matrix.cooperativeMatrix) {
+		matrix.cooperativeMatrix = VK_TRUE;
+		matrix.pNext             = const_cast<void*>(create_info.pNext);
+		create_info.pNext        = &matrix;
+	}
+	vk::PhysicalDeviceShaderFloat8FeaturesEXT float8 {};
+	if (float8_extension && supported_float8.shaderFloat8) {
+		float8.shaderFloat8                  = VK_TRUE;
+		float8.shaderFloat8CooperativeMatrix = supported_float8.shaderFloat8CooperativeMatrix;
+		float8.pNext                         = const_cast<void*>(create_info.pNext);
+		create_info.pNext                    = &float8;
+	}
+	vk::PhysicalDeviceCooperativeMatrix2FeaturesNV matrix2 {};
+	if (matrix2_extension && supported_matrix2.cooperativeMatrixConversions) {
+		matrix2.cooperativeMatrixConversions = VK_TRUE;
+		matrix2.pNext                        = const_cast<void*>(create_info.pNext);
+		create_info.pNext                    = &matrix2;
 	}
 	create_info.flags                   = {};
 	create_info.pQueueCreateInfos       = queue_create_infos.data();
@@ -1788,6 +1845,14 @@ void WindowContext::CreateVulkan() {
 		AntiLag::AddDeviceExtension(available_extensions, device_extensions); // (KYTY_LOW_LATENCY)
 		// KYTY_FSR4=1 (Linux): the extensions AMD's FSR 4 shaders and Vulkan backend use (fsr4-linux.h).
 		Fsr4Linux::AddDeviceExtensions(available_extensions, device_extensions);
+		// KYTY_FSR4_MATRIX=1 (local, Fsr4MatrixFeatures): the matrix extensions of FSR 4's FP8 model, where offered.
+		if (Fsr4MatrixFeatures()) {
+			for (const char* extension: {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
+			                             VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME}) {
+				if (HasExtension(available_extensions, extension) && !HasExtension(device_extensions, extension))
+					device_extensions.push_back(extension);
+			}
+		}
 		// KYTY_PIPELINE_STATS=<hash,...> (diagnostic): the driver's statistics of those compute programs' pipelines
 		// (registers, spills, waves per SIMD: PIPESTATS lines, CreatePipelineInternal).
 		if (std::getenv("KYTY_PIPELINE_STATS") != nullptr &&
