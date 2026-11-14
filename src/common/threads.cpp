@@ -360,7 +360,13 @@ void Mutex::Lock() {
 	}();
 	if (fast_locks) {
 		if (m_mutex->m_mutex.try_lock()) return;
-		for (int spin = 0; spin < 4000; ++spin) {
+		// kyty-otimizacao KYTY_LOCK_SPINS=<n>: the pauses before blocking (4000: ~65 us on a Zen 3).
+		static const int spins = [] {
+			const char* value = std::getenv("KYTY_LOCK_SPINS");
+			const long  count = value != nullptr && *value != '\0' ? std::strtol(value, nullptr, 10) : 4000;
+			return static_cast<int>(count < 0 ? 0 : (count > 1000000 ? 1000000 : count));
+		}();
+		for (int spin = 0; spin < spins; ++spin) {
 			_mm_pause();
 			if ((spin & 15) == 15 && m_mutex->m_mutex.try_lock()) return;
 		}

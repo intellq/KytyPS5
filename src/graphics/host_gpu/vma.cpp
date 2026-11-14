@@ -78,6 +78,10 @@ bool GraphicContext::CreateAllocator() {
 	if (memory_budget_ext_enabled) {
 		info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 	}
+	// kyty-otimizacao KYTY_MEMORY_PRIORITY=1: VMA passes each allocation's priority to the driver.
+	if (memory_priority_tuning) {
+		info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
+	}
 	// VMA's blocks: 64 MiB on a GPU with less than 13 GiB of video memory (KYTY_SIMULATE_VRAM_MB counts), VMA's 256 MiB
 	// on bigger ones. Such a GPU runs past its budget and the driver keeps part of the game's memory in system memory: 1-1
 	// tours with 8 GB, each order once: walk 70.0 vs 67.4 and 72.2 vs 69.6 fps, spin 68.3 vs 65.9 and 71.4 vs 69.1, the
@@ -581,6 +585,13 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 		alloc_info.requiredFlags = 0;
 		if (prefer_device) alloc_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 		else alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+	}
+	// kyty-otimizacao KYTY_MEMORY_PRIORITY=1: render targets and depth, which the GPU writes every frame, are the last the
+	// driver moves out of video memory: priority 1 in memory of their own (VMA's blocks all have 0.5).
+	if (memory_priority_tuning && !host_preferred &&
+	    (image_info.usage & (vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eDepthStencilAttachment))) {
+		alloc_info.flags    |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+		alloc_info.priority  = 1.0f;
 	}
 	vk::Result result = vk::Result::eSuccess;
 	const auto create = [&] {

@@ -1,3 +1,9 @@
+#if defined(__linux__)
+#include "linux-tuning.h"
+#include <sys/prctl.h>
+#include <string>
+#include <cstdio>
+#endif
 #include "common/archive.h"
 #include "common/assert.h"
 #include "common/common.h"
@@ -443,6 +449,22 @@ int main(int argc, char* argv[]) {
 	if (const char* ask = std::getenv("KYTY_RADV_TRANSFER_QUEUE"); ask == nullptr || ask[0] != '0') {
 		setenv("RADV_EXPERIMENTAL", "transfer_queue", 0);
 		setenv("RADV_PERFTEST", "transfer_queue", 0);
+	}
+	// kyty-otimizacao (local/linux-tuning.h): the experiments asked for, and the timer slack before any thread starts
+	// (a new thread takes its creator's).
+	{
+		static const char* const names[] = {"KYTY_TIMER_SLACK_NS",   "KYTY_UPLOAD_NICE",     "KYTY_BACKGROUND_BATCH",
+		                                    "KYTY_LOCK_SPINS",       "KYTY_MEMORY_PRIORITY", "KYTY_GUEST_HUGEPAGES",
+		                                    "KYTY_GUEST_DONTDUMP",   "KYTY_SWAPCHAIN_IMAGES", "KYTY_PRESENT_WAIT",
+		                                    "KYTY_HDR_METADATA"};
+		std::string asked;
+		for (const char* name: names)
+			if (const char* text = std::getenv(name); text != nullptr && *text != '\0')
+				asked += std::string(" ") + name + "=" + text;
+		std::printf("Linux tuning (kyty-otimizacao):%s\n", asked.empty() ? " nothing asked for" : asked.c_str());
+		std::fflush(stdout);
+		if (const long slack = LinuxTuning::Value("KYTY_TIMER_SLACK_NS", 0); slack > 0)
+			(void)prctl(PR_SET_TIMERSLACK, static_cast<unsigned long>(slack), 0, 0, 0);
 	}
 #endif
 	VirtualMemory::Init();

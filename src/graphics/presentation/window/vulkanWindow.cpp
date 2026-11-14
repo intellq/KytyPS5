@@ -1,3 +1,4 @@
+#include "linux-tuning.h"
 #include "SDL.h"
 #include "SDL_error.h"
 #include "SDL_events.h"
@@ -1252,6 +1253,18 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		present_id.pNext     = const_cast<void*>(create_info.pNext);
 		create_info.pNext    = &present_id;
 	}
+	vk::PhysicalDevicePresentWaitFeaturesKHR present_wait {};
+	if (HasExtension(device_extensions, VK_KHR_PRESENT_WAIT_EXTENSION_NAME)) {
+		present_wait.presentWait = VK_TRUE;
+		present_wait.pNext       = const_cast<void*>(create_info.pNext);
+		create_info.pNext        = &present_wait;
+	}
+	vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT pageable_memory {};
+	if (HasExtension(device_extensions, VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME)) {
+		pageable_memory.pageableDeviceLocalMemory = VK_TRUE;
+		pageable_memory.pNext                     = const_cast<void*>(create_info.pNext);
+		create_info.pNext                         = &pageable_memory;
+	}
 	vk::PhysicalDevicePipelineBinaryFeaturesKHR     binaries {};
 	vk::PhysicalDeviceMaintenance5FeaturesKHR       maintenance5 {};
 	vk::DevicePipelineBinaryInternalCacheControlKHR internal_cache {};
@@ -1797,10 +1810,18 @@ void WindowContext::CreateVulkan() {
 		}
 		// KYTY_SIMULATE_VRAM_MB: the start-up ballast keeps its video memory over the game's (priorities).
 		if (const char* simulate = std::getenv("KYTY_SIMULATE_VRAM_MB");
-		    simulate != nullptr && std::strtoull(simulate, nullptr, 10) > 0 &&
+		    ((simulate != nullptr && std::strtoull(simulate, nullptr, 10) > 0) || LinuxTuning::On("KYTY_MEMORY_PRIORITY")) &&
 		    HasExtension(available_extensions, VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
 			graphic_ctx.memory_priority_enabled = true;
+			// kyty-otimizacao KYTY_MEMORY_PRIORITY=1: priorities for the game's own images too (vma.cpp).
+			if (LinuxTuning::On("KYTY_MEMORY_PRIORITY")) {
+				graphic_ctx.memory_priority_tuning = true;
+				if (HasExtension(available_extensions, VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME))
+					device_extensions.push_back(VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME);
+				std::printf("Vulkan: memory priorities on (KYTY_MEMORY_PRIORITY), pageable device-local memory %d\n",
+				            HasExtension(device_extensions, VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME) ? 1 : 0);
+			}
 		}
 		for (const auto* extension: {VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
 		                             VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME,
@@ -1828,6 +1849,19 @@ void WindowContext::CreateVulkan() {
 		// extension it requires; current drivers then refuse the device.
 		if (FrameGen::Requested() && HasExtension(available_extensions, VK_KHR_PRESENT_ID_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_PRESENT_ID_EXTENSION_NAME);
+		}
+		// kyty-otimizacao KYTY_PRESENT_WAIT=1: present ids and the wait for them (swapchain.cpp).
+		if (LinuxTuning::On("KYTY_PRESENT_WAIT") && HasExtension(available_extensions, VK_KHR_PRESENT_ID_EXTENSION_NAME) &&
+		    HasExtension(available_extensions, VK_KHR_PRESENT_WAIT_EXTENSION_NAME)) {
+			if (!HasExtension(device_extensions, VK_KHR_PRESENT_ID_EXTENSION_NAME))
+				device_extensions.push_back(VK_KHR_PRESENT_ID_EXTENSION_NAME);
+			device_extensions.push_back(VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
+			graphic_ctx.present_wait_enabled = true;
+		}
+		// kyty-otimizacao KYTY_HDR_METADATA=<nits>: the HDR10 swapchain's metadata (swapchain.cpp).
+		if (LinuxTuning::Value("KYTY_HDR_METADATA", 0) > 0 && HasExtension(available_extensions, VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_EXT_HDR_METADATA_EXTENSION_NAME);
+			graphic_ctx.hdr_metadata_enabled = true;
 		}
 		// KYTY_FRAMEGEN_BACKEND=fsr: FidelityFX's Vulkan backend calls the functions of the extensions the GPU offers, not
 		// of those the device enabled (its GPU breadcrumbs: vkGetBufferMemoryRequirements2KHR, vkCmdWriteBufferMarker2AMD;
@@ -2055,10 +2089,18 @@ bool CreateHeadlessGraphicContext(GraphicContext& graphic_ctx) {
 		}
 		// KYTY_SIMULATE_VRAM_MB: the start-up ballast keeps its video memory over the game's (priorities).
 		if (const char* simulate = std::getenv("KYTY_SIMULATE_VRAM_MB");
-		    simulate != nullptr && std::strtoull(simulate, nullptr, 10) > 0 &&
+		    ((simulate != nullptr && std::strtoull(simulate, nullptr, 10) > 0) || LinuxTuning::On("KYTY_MEMORY_PRIORITY")) &&
 		    HasExtension(available_extensions, VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
 			graphic_ctx.memory_priority_enabled = true;
+			// kyty-otimizacao KYTY_MEMORY_PRIORITY=1: priorities for the game's own images too (vma.cpp).
+			if (LinuxTuning::On("KYTY_MEMORY_PRIORITY")) {
+				graphic_ctx.memory_priority_tuning = true;
+				if (HasExtension(available_extensions, VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME))
+					device_extensions.push_back(VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME);
+				std::printf("Vulkan: memory priorities on (KYTY_MEMORY_PRIORITY), pageable device-local memory %d\n",
+				            HasExtension(device_extensions, VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME) ? 1 : 0);
+			}
 		}
 		for (const auto* extension: {VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
 		                             VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME,

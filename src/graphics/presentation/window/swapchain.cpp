@@ -25,6 +25,7 @@
 #include "fsr-native.h"
 #include "frame-gen-hudless.h"
 #include "live-counters.h"
+#include "linux-tuning.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
 #if defined(_WIN32)
@@ -1214,6 +1215,12 @@ void Swapchain::Create() {
 		               surface.capabilities.maxImageExtent.height);
 	}
 	uint32_t image_count = surface.capabilities.minImageCount + 1;
+	// kyty-otimizacao KYTY_SWAPCHAIN_IMAGES=<n>: that many, no fewer than the surface's minimum.
+	if (const long asked = LinuxTuning::Value("KYTY_SWAPCHAIN_IMAGES", 0); asked > 0) {
+		image_count = std::max(surface.capabilities.minImageCount, static_cast<uint32_t>(asked));
+		std::printf("Vulkan presentation: %u swapchain images asked for (KYTY_SWAPCHAIN_IMAGES; the surface's minimum %u)\n",
+		            image_count, surface.capabilities.minImageCount);
+	}
 	if (surface.capabilities.maxImageCount != 0) {
 		image_count = std::min(image_count, surface.capabilities.maxImageCount);
 	}
@@ -1289,6 +1296,24 @@ void Swapchain::Create() {
 		                     "vkCreateSwapchainKHR");
 	}
 	EXIT_IF(m_handle == nullptr);
+	// kyty-otimizacao KYTY_HDR_METADATA=<nits>: the compositor learns the image's primaries and peak (BT.2020, D65).
+	if (m_hdr_active && graphics.hdr_metadata_enabled && !FrameGen::OwnsSwapchain() &&
+	    VULKAN_HPP_DEFAULT_DISPATCHER.vkSetHdrMetadataEXT != nullptr) {
+		const auto       nits = static_cast<float>(LinuxTuning::Value("KYTY_HDR_METADATA", 1000));
+		VkHdrMetadataEXT metadata {};
+		metadata.sType                     = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
+		metadata.displayPrimaryRed         = {0.708f, 0.292f};
+		metadata.displayPrimaryGreen       = {0.170f, 0.797f};
+		metadata.displayPrimaryBlue        = {0.131f, 0.046f};
+		metadata.whitePoint                = {0.3127f, 0.3290f};
+		metadata.maxLuminance              = nits;
+		metadata.minLuminance              = 0.005f;
+		metadata.maxContentLightLevel      = nits;
+		metadata.maxFrameAverageLightLevel = nits * 0.5f;
+		const VkSwapchainKHR native        = m_handle;
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkSetHdrMetadataEXT(graphics.device, 1, &native, &metadata);
+		std::printf("Vulkan presentation: HDR metadata sent, peak %.0f nits (KYTY_HDR_METADATA)\n", nits);
+	}
 	if (Config::HdrEnabled()) {
 		std::printf("Vulkan presentation: %s\n", m_hdr_active ? "HDR10 (PQ)" : "SDR");
 		std::fflush(stdout);
@@ -1877,6 +1902,27 @@ Swapchain::Status Swapchain::Present() {
 	present.pImageIndices      = &m_image_index;
 	present.pWaitSemaphores    = &ready;
 	present.waitSemaphoreCount = 1;
+
+	// kyty-otimizacao KYTY_PRESENT_WAIT=1: this present goes out once the one before it is on the screen (50 ms at most),
+	// so no more than one waits in the queue. FSR's frame generation swapchain numbers its own presents.
+	static uint64_t         wait_id = 0;
+	static vk::SwapchainKHR wait_swapchain;
+	vk::PresentIdKHR        wait_present {};
+	if (m_window.graphic_ctx.present_wait_enabled && !FrameGen::OwnsSwapchain() &&
+	    VULKAN_HPP_DEFAULT_DISPATCHER.vkWaitForPresentKHR != nullptr) {
+		if (wait_swapchain != m_handle) {
+			wait_swapchain = m_handle;
+			wait_id        = 0;
+			std::printf("Vulkan presentation: presents wait for the one before (KYTY_PRESENT_WAIT)\n");
+		}
+		if (wait_id != 0) {
+			(void)VULKAN_HPP_DEFAULT_DISPATCHER.vkWaitForPresentKHR(m_window.graphic_ctx.device, m_handle, wait_id, 50000000);
+		}
+		++wait_id;
+		wait_present.swapchainCount = 1;
+		wait_present.pPresentIds    = &wait_id;
+		present.pNext               = &wait_present;
+	}
 
 	vk::Result result;
 	if (auto& graphics = m_window.graphic_ctx; FrameGen::OwnsSwapchain() && graphics.present_queue != nullptr) {

@@ -35,6 +35,10 @@ struct GraphicContext {
 	bool                               memory_budget_ext_enabled             = false;
 	// VK_EXT_memory_priority, enabled only for KYTY_SIMULATE_VRAM_MB (vma.cpp).
 	bool                               memory_priority_enabled               = false;
+	// kyty-otimizacao (local/linux-tuning.h): KYTY_MEMORY_PRIORITY, KYTY_PRESENT_WAIT, KYTY_HDR_METADATA.
+	bool                               memory_priority_tuning                = false;
+	bool                               present_wait_enabled                  = false;
+	bool                               hdr_metadata_enabled                  = false;
 	// KYTY_FULLSCREEN_EXCLUSIVE=0|1 (Windows, issue #166): the swapchain asks the driver to keep out of exclusive
 	// fullscreen (0) or allows it (1), through VK_EXT_full_screen_exclusive; -1 (unset on a GPU other than AMD's, or
 	// the extension missing): the driver's own choice. Unset on an AMD GPU: 0, full_screen_exclusive_default.

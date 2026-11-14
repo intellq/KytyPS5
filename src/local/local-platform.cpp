@@ -46,6 +46,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include "linux-tuning.h"
 #include <sched.h>
 #include <string>
 #include <sys/file.h>
@@ -2381,6 +2382,14 @@ int KeepRenderCoreAlone() {
 
 void MakeBackgroundThread(const char* avoid_cpus) {
 	(void)setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), 10);
+#if defined(__linux__)
+	// kyty-otimizacao KYTY_BACKGROUND_BATCH=1: SCHED_BATCH too, the scheduler's class for work no one waits for.
+	static const bool batch = LinuxTuning::On("KYTY_BACKGROUND_BATCH");
+	if (batch) {
+		sched_param param {};
+		(void)sched_setscheduler(static_cast<pid_t>(ThreadId()), SCHED_BATCH, &param);
+	}
+#endif
 	AvoidCpuList(avoid_cpus);
 }
 
@@ -2395,7 +2404,15 @@ void MakeCriticalThread() {
 #endif
 }
 
-void MakeAboveGameThread() {}
+void MakeAboveGameThread() {
+#if defined(__linux__)
+	// kyty-otimizacao KYTY_UPLOAD_NICE=<-20..-1>: Windows' THREAD_PRIORITY_ABOVE_NORMAL as a nice value, where the nice
+	// limit allows it (RLIMIT_NICE), else unchanged.
+	static const long nice_value = LinuxTuning::Value("KYTY_UPLOAD_NICE", 0);
+	if (nice_value < 0)
+		(void)setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), static_cast<int>(nice_value < -20 ? -20 : nice_value));
+#endif
+}
 
 // (Linux: back to a nice value below 0 is allowed again, RLIMIT_NICE having allowed it the first time.)
 NormalPriority::NormalPriority() {

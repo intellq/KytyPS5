@@ -173,6 +173,7 @@ public:
 			m_fd = -1;
 			return;
 		}
+		AdviseShared(backing, m_size);
 		m_backing_base = static_cast<uint8_t*>(backing);
 #endif
 	}
@@ -1476,8 +1477,29 @@ private:
 			SetFailure(failure_reason, FailureReason::FixedMapViewFailed);
 			return nullptr;
 		}
+		AdviseShared(ptr, size);
 		VirtualMemory::WriteWatchMapped(vaddr, size, mode);
 		return ptr;
+	}
+
+	// kyty-otimizacao: KYTY_GUEST_HUGEPAGES=1 asks for huge pages on a shared mapping of the direct memory (shmem THP
+	// "advise" gives them to mappings that ask), KYTY_GUEST_DONTDUMP=1 leaves it out of a core dump.
+	static void AdviseShared(void* address, uint64_t size) {
+#if defined(__linux__)
+		static const bool huge = [] {
+			const char* value = std::getenv("KYTY_GUEST_HUGEPAGES");
+			return value != nullptr && std::atoi(value) != 0;
+		}();
+		static const bool no_dump = [] {
+			const char* value = std::getenv("KYTY_GUEST_DONTDUMP");
+			return value != nullptr && std::atoi(value) != 0;
+		}();
+		if (huge) (void)madvise(address, size, MADV_HUGEPAGE);
+		if (no_dump) (void)madvise(address, size, MADV_DONTDUMP);
+#else
+		(void)address;
+		(void)size;
+#endif
 	}
 
 	// Replace the file view atomically instead of exposing an unmapped hole in the
